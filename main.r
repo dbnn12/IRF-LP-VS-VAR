@@ -44,6 +44,7 @@ dir.create("output", showWarnings = FALSE)
 cat("Loading core functions...\n")
 source("functions.R")  # basic functions
 source("dm_test.R")    # DM test functions 
+source("analysis.R")   # analysis functions (moved up before usage)
 
 # Load simulation.R which have all simulation functions
 cat("Loading simulation functions...\n")
@@ -105,8 +106,8 @@ if (use_saved_results) {
     # If neither individual files exist, try to load from intermediate files
     if (run_bias_sim && !exists("bias_results_DGP1")) {
       cat("Full bias results not found. Attempting to reconstruct from intermediate files...\n")
-      bias_results_DGP1 <- list(true_irf = NULL, bias_results = list())
-      bias_results_DGP2 <- list(true_irf = NULL, bias_results = list())
+      bias_results_DGP1 <- list(true_irf = NULL, bias_results = list(), rmse_results = list())
+      bias_results_DGP2 <- list(true_irf = NULL, bias_results = list(), rmse_results = list())
       
       # Look for intermediate bias results
       reconstructed_bias <- FALSE
@@ -119,11 +120,19 @@ if (use_saved_results) {
               if (is.null(bias_results_DGP1$true_irf)) bias_results_DGP1$true_irf <- intermediate_results$true_irf
               bias_results_DGP1$bias_results[[paste0("T", T_value)]] <- 
                 intermediate_results$bias_results[[paste0("T", T_value)]]
+              if (!is.null(intermediate_results$rmse_results)) {
+                bias_results_DGP1$rmse_results[[paste0("T", T_value)]] <- 
+                  intermediate_results$rmse_results[[paste0("T", T_value)]]
+              }
               reconstructed_bias <- TRUE
             } else {
               if (is.null(bias_results_DGP2$true_irf)) bias_results_DGP2$true_irf <- intermediate_results$true_irf
               bias_results_DGP2$bias_results[[paste0("T", T_value)]] <- 
                 intermediate_results$bias_results[[paste0("T", T_value)]]
+              if (!is.null(intermediate_results$rmse_results)) {
+                bias_results_DGP2$rmse_results[[paste0("T", T_value)]] <- 
+                  intermediate_results$rmse_results[[paste0("T", T_value)]]
+              }
               reconstructed_bias <- TRUE
             }
             cat("  Loaded intermediate bias results for", dgp_name, "T =", T_value, "\n")
@@ -226,9 +235,6 @@ cat("All simulation results saved to output/simulation_results.RData\n")
 #--------------------------------------------------------------
 cat("Analyzing results and creating visualizations...\n")
 
-# Source analysis script after simulation 
-source("analysis.R")
-
 # Create bias plots
 if (run_bias_sim && !is.null(bias_results_DGP1) && !is.null(bias_results_DGP2)) {
   cat("Creating bias plots...\n")
@@ -257,7 +263,7 @@ if (run_bias_sim && !is.null(bias_results_DGP1) && !is.null(bias_results_DGP2)) 
   if (!is.null(bias_plots_DGP2_R12$plot_small)) ggsave("output/bias_DGP2_R12_small.png", bias_plots_DGP2_R12$plot_small, width = 10, height = 6)
   if (!is.null(bias_plots_DGP2_R22$plot_small)) ggsave("output/bias_DGP2_R22_small.png", bias_plots_DGP2_R22$plot_small, width = 10, height = 6)
   
-  # Save bias plots για μεγάλα δείγματα αν υπάρχουν
+  # Save bias plots for large samples if they exist
   if (max(T_values) > 400) {
     if (!is.null(bias_plots_DGP1_R11$plot_large)) ggsave("output/bias_DGP1_R11_large.png", bias_plots_DGP1_R11$plot_large, width = 10, height = 6)
     if (!is.null(bias_plots_DGP1_R21$plot_large)) ggsave("output/bias_DGP1_R21_large.png", bias_plots_DGP1_R21$plot_large, width = 10, height = 6)
@@ -272,7 +278,7 @@ if (run_bias_sim && !is.null(bias_results_DGP1) && !is.null(bias_results_DGP2)) 
   
   # Create combined bias figure (similar to Figure 1 in the paper)
   cat("Creating combined bias figure...\n")
-  # Επιλέγουμε τρία αντιπροσωπευτικά μεγέθη δείγματος, αν υπάρχουν
+  # Select three representative sample sizes if available
   if (length(T_values) >= 3) {
     sample_sizes_to_show <- c(min(T_values), median(T_values), max(T_values))
   } else {
@@ -281,6 +287,37 @@ if (run_bias_sim && !is.null(bias_results_DGP1) && !is.null(bias_results_DGP2)) 
   
   combined_figure <- create_combined_bias_figure(bias_results_DGP1, bias_results_DGP2, sample_sizes_to_show)
   if (!is.null(combined_figure)) ggsave("output/combined_bias_figure.png", combined_figure, width = 12, height = 16)
+}
+
+# Create RMSE tables
+if (run_bias_sim && !is.null(bias_results_DGP1) && !is.null(bias_results_DGP2)) {
+  cat("Creating RMSE tables...\n")
+  
+  # Select representative horizons
+  horizons_to_show <- c(1, 3, 5, 10, 15)
+  
+  # Create tables comparing VAR and LP RMSE values
+  rmse_tables <- create_rmse_tables(bias_results_DGP1, bias_results_DGP2, horizons_to_show)
+  
+  # Format for LaTeX
+  latex_tables <- format_tables_for_latex(rmse_tables)
+  
+  # Save individual tables
+  cat("Saving RMSE tables...\n")
+  for (name in names(latex_tables)) {
+    file_name <- paste0("output/rmse_table_", gsub("[(),]", "", name), ".tex")
+    cat(latex_tables[[name]], file = file_name)
+  }
+  
+  # Create combined tables
+  combined_table_DGP1 <- create_combined_rmse_table(rmse_tables, "DGP-1")
+  combined_table_DGP2 <- create_combined_rmse_table(rmse_tables, "DGP-2")
+  
+  # Save combined tables
+  cat(combined_table_DGP1, file = "output/rmse_table_combined_DGP1.tex")
+  cat(combined_table_DGP2, file = "output/rmse_table_combined_DGP2.tex")
+  
+  cat("RMSE tables created and saved to output directory.\n")
 }
 
 # Create DM test rejection plots and tables
@@ -322,6 +359,11 @@ if (run_dm_sim && !is.null(dm_results_DGP1) && !is.null(dm_results_DGP2)) {
   write.csv(rejection_tables_DGP2$R12, "output/rejection_DGP2_R12.csv")
   write.csv(rejection_tables_DGP2$R22, "output/rejection_DGP2_R22.csv")
 }
+
+# Save tables as images
+cat("Saving rejection tables as images...\n")
+save_rejection_tables_as_images(rejection_tables_DGP1, "DGP-1")
+save_rejection_tables_as_images(rejection_tables_DGP2, "DGP-2")
 
 cat("Analysis complete. Results saved to output directory.\n")
 cat("Project execution completed successfully.\n")
